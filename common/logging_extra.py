@@ -8,18 +8,6 @@ from threading import local
 from collections import OrderedDict
 from contextlib import contextmanager
 
-def json_handler(obj):
-  # if isinstance(obj, (datetime.date, datetime.time)):
-  #   return obj.isoformat()
-  return repr(obj)
-
-def json_robust_dumps(obj):
-  return json.dumps(obj, default=json_handler)
-
-class NiceOrderedDict(OrderedDict):
-  def __str__(self):
-    return json_robust_dumps(self)
-
 class SwagFormatter(logging.Formatter):
   def __init__(self, swaglogger):
     logging.Formatter.__init__(self, None, '%a %b %d %H:%M:%S %Z %Y')
@@ -27,8 +15,13 @@ class SwagFormatter(logging.Formatter):
     self.swaglogger = swaglogger
     self.host = socket.gethostname()
 
-  def format_dict(self, record):
-    record_dict = NiceOrderedDict()
+  def json_handler(self, obj):
+    # if isinstance(obj, (datetime.date, datetime.time)):
+    #   return obj.isoformat()
+    return repr(obj)
+
+  def format(self, record):
+    record_dict = OrderedDict()
 
     if isinstance(record.msg, dict):
       record_dict['msg'] = record.msg
@@ -57,14 +50,9 @@ class SwagFormatter(logging.Formatter):
     record_dict['threadName'] = record.threadName
     record_dict['created'] = record.created
 
-    return record_dict
+    # asctime = self.formatTime(record, self.datefmt)
 
-  def format(self, record):
-    return json_robust_dumps(self.format_dict(record))
-
-class SwagErrorFilter(logging.Filter):
-  def filter(self, record):
-    return record.levelno < logging.ERROR
+    return json.dumps(record_dict, default=self.json_handler)
 
 _tmpfunc = lambda: 0
 _srcfile = os.path.normcase(_tmpfunc.__code__.co_filename)
@@ -77,6 +65,28 @@ class SwagLogger(logging.Logger):
 
     self.log_local = local()
     self.log_local.ctx = {}
+
+  def findCaller(self):
+    """
+      Find the stack frame of the caller so that we can note the source
+      file name, line number and function name.
+      """
+    # f = currentframe()
+    f = sys._getframe(3)
+    #On some versions of IronPython, currentframe() returns None if
+    #IronPython isn't run with -X:Frames.
+    if f is not None:
+      f = f.f_back
+    rv = "(unknown file)", 0, "(unknown function)"
+    while hasattr(f, "f_code"):
+      co = f.f_code
+      filename = os.path.normcase(co.co_filename)
+      if filename in (logging._srcfile, _srcfile):
+        f = f.f_back
+        continue
+      rv = (co.co_filename, f.f_lineno, co.co_name)
+      break
+    return rv
 
   def local_ctx(self):
     try:
@@ -105,48 +115,20 @@ class SwagLogger(logging.Logger):
     self.global_ctx.update(kwargs)
 
   def event(self, event_name, *args, **kwargs):
-    evt = NiceOrderedDict()
+    evt = OrderedDict()
     evt['event'] = event_name
     if args:
       evt['args'] = args
     evt.update(kwargs)
-    ctx = self.get_ctx()
-    if ctx:
-      evt['ctx'] = self.get_ctx()
-    if 'error' in kwargs:
-      self.error(evt)
-    else:
-      self.info(evt)
+    self.info(evt)
 
 if __name__ == "__main__":
   log = SwagLogger()
 
-  stdout_handler = logging.StreamHandler(sys.stdout)
-  stdout_handler.setLevel(logging.INFO)
-  stdout_handler.addFilter(SwagErrorFilter())
-  log.addHandler(stdout_handler)
-
-  stderr_handler = logging.StreamHandler(sys.stderr)
-  stderr_handler.setLevel(logging.ERROR)
-  log.addHandler(stderr_handler)
-
   log.info("asdasd %s", "a")
   log.info({'wut': 1})
-  log.warning("warning")
-  log.error("error")
-  log.critical("critical")
-  log.event("test", x="y")
 
   with log.ctx():
-    stdout_handler.setFormatter(SwagFormatter(log))
-    stderr_handler.setFormatter(SwagFormatter(log))
     log.bind(user="some user")
     log.info("in req")
-    print("")
-    log.warning("warning")
-    print("")
-    log.error("error")
-    print("")
-    log.critical("critical")
-    print("")
-    log.event("do_req", a=1, b="c")
+    log.event("do_req")

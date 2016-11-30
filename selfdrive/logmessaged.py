@@ -1,25 +1,25 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 import zmq
 from logentries import LogentriesHandler
-import cereal.messaging as messaging
+from common.services import service_list
+import selfdrive.messaging as messaging
 
-def main(gctx=None):
+def main(gctx):
   # setup logentries. we forward log messages to it
-  le_token = "e8549616-0798-4d7e-a2ca-2513ae81fa17"
-  le_handler = LogentriesHandler(le_token, use_tls=False, verbose=False)
+  le_token = "bc65354a-b887-4ef4-8525-15dd51230e8c"
+  le_handler = LogentriesHandler(le_token, use_tls=False)
 
   le_level = 20 #logging.INFO
 
-  ctx = zmq.Context().instance()
+  ctx = zmq.Context()
   sock = ctx.socket(zmq.PULL)
   sock.bind("ipc:///tmp/logmessage")
 
   # and we publish them
-  pub_sock = messaging.pub_sock('logMessage')
+  pub_sock = messaging.pub_sock(ctx, service_list['logMessage'].port)
 
   while True:
-    dat = b''.join(sock.recv_multipart())
-    dat = dat.decode('utf8')
+    dat = ''.join(sock.recv_multipart())
 
     # print "RECV", repr(dat)
 
@@ -28,7 +28,6 @@ def main(gctx=None):
 
     if levelnum >= le_level:
       # push to logentries
-      # TODO: push to athena instead
       le_handler.emit_raw(dat)
 
     # then we publish them
@@ -37,4 +36,4 @@ def main(gctx=None):
     pub_sock.send(msg.to_bytes())
 
 if __name__ == "__main__":
-  main()
+  main(None)
